@@ -1,7 +1,6 @@
 <mujoco model="right_arm_only">
   <compiler angle="degree" meshdir="assets"/>
-  <option integrator="implicitfast"/>
-  <option gravity="0 0 -9.81"/>
+  <option integrator="RK4" gravity="0 0 -9.81" timestep="0.001"/>
 
   <default>
     <default class="arm">
@@ -40,22 +39,22 @@
       <body name="right_shoulder_pitch_link" pos="0 -0.1 0.25" quat="0.990264 -0.139201 1.38722e-05 9.86868e-05">
         <inertial pos="0 0 -0.15996" quat="1 0 0 0" mass="1.96"
           diaginertia="0.01671697 0.01671697 0.01671697"/>
-        <joint name="right_shoulder_pitch_joint" axis="0 1 0" type="hinge" range="-180 50"/>
+        <joint name="right_shoulder_pitch_joint" axis="0 1 0" type="hinge" range="-180 50" damping="0.5"/>
         <geom class="visual" mesh="right_shoulder_pitch_link"/>
         <body name="right_shoulder_roll_link" pos="0 -0.038 -0.013831" quat="0.990268 0.139172 0 0">
           <inertial pos="0 0 0" quat="1 0 0 0"
             mass="0.001" diaginertia="0.001 0.001 0.001"/>
-          <joint name="right_shoulder_roll_joint" axis="1 0 0" type="hinge" range="-180 0"/>
+          <joint name="right_shoulder_roll_joint" axis="1 0 0" type="hinge" range="-180 0" damping="0.5"/>
           <geom class="visual" mesh="right_shoulder_roll_link"/>
           <body name="right_shoulder_yaw_link" pos="0 -0.00624 -0.1032">
             <inertial pos="0 0 0" quat="1 0 0 0"
               mass="0.001" diaginertia="0.001 0.001 0.001"/>
-            <joint name="right_shoulder_yaw_joint" axis="0 0 1" type="hinge" range="-60 80"/>
+            <joint name="right_shoulder_yaw_joint" axis="0 0 1" type="hinge" range="-60 80" damping="0.5"/>
             <geom class="visual" mesh="right_shoulder_yaw_link"/>
             <body name="right_elbow_link" pos="0.015783 0 -0.080518">
               <inertial pos="0 0 -0.20615275" quat="1 0 0 0" mass="1.68"
                 diaginertia="0.15032936 0.15032936 0.15032936"/>
-              <joint name="right_elbow_joint" axis="0 1 0" type="hinge" range="-60 90"/>
+              <joint name="right_elbow_joint" axis="0 1 0" type="hinge" range="-60 90" damping="0.1"/>
               <geom class="visual" mesh="right_elbow_link"/>
               <body name="right_wrist_roll_link" pos="0.1 0 0"> <!-- ここから追加 -->
                 <inertial pos="0 0 0" quat="1 0 0 0" mass="0.001" diaginertia="0.0001 0.0001 0.0001"/>
@@ -73,6 +72,7 @@
                       <inertial pos="0 0 0" quat="1 0 0 0" mass="0.001" diaginertia="0.0001 0.0001 0.0001"/>
                       <joint name="right_rubber_hand_joint" axis="1 0 0" type="hinge" range="0 0"/> <!-- 自由度0 -->
                       <geom class="visual" mesh="right_rubber_hand"/>
+                      <site name="hand_tip" pos="0.05 0 0" size="0.01" type="sphere" rgba="1 0 0 1"/>
                     </body>
                   </body>
                 </body>
@@ -85,9 +85,9 @@
   </worldbody>
 
   <actuator>
-    <general name="shoulder_pitch_actuator" joint="right_shoulder_pitch_joint" ctrllimited="true" ctrlrange="-20 20"/>
-    <general name="shoulder_roll_actuator" joint="right_shoulder_roll_joint" ctrllimited="true" ctrlrange="-20 20"/>
-    <general name="shoulder_yaw_actuator" joint="right_shoulder_yaw_joint" ctrllimited="true" ctrlrange="-20 20"/>
+    <general name="shoulder_pitch_actuator" joint="right_shoulder_pitch_joint" ctrllimited="true" ctrlrange="-30 30"/>
+    <general name="shoulder_roll_actuator" joint="right_shoulder_roll_joint" ctrllimited="true" ctrlrange="-30 30"/>
+    <general name="shoulder_yaw_actuator" joint="right_shoulder_yaw_joint" ctrllimited="true" ctrlrange="-30 30"/>
     <general name="elbow_actuator" joint="right_elbow_joint" ctrllimited="true" ctrlrange="-20 20"/>
   </actuator>
 
