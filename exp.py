@@ -3,6 +3,7 @@ from mujoco import MjModel, MjData
 import numpy as np
 import os
 from itertools import product
+import pandas as pd
 
 # MuJoCoモデルのロード
 model_path = 'g1.xml'  # あなたのMuJoCo XMLファイルパス
@@ -12,7 +13,7 @@ data = MjData(model)
 # 定数
 L = 1.72  # 身長
 ma = 70  # 全体質量
-g = 9.80  # 重力加速度
+# g = 9.80  # 重力加速度
 
 # 上腕リンクの長さ
 l1 = 0.186 * L
@@ -48,25 +49,64 @@ I2_ball = 0.14 * l2**2
 I2 = I2_forearm + I2_hand + I2_ball
 
 # xmlモデルの長さ、重さ、慣性モーメントをpythonで上書きし、内部的にはpythonのパラメータで計算
-# ボディのIDを取得
-upper_arm_id = model.body("right_shoulder_pitch_link").id
-forearm_id = model.body("light_elbow_link").id
+# 上腕
+upper_arm_body_id = model.body('right_shoulder_pitch_link').id
+model.body_mass[upper_arm_body_id] = m1
+model.body_inertia[upper_arm_body_id] = [I1, I1, I1]
+model.body_ipos[upper_arm_body_id] = [0, 0, -lg1]  # 重心位置を設定
 
-# 重さの上書き
-model.body_mass[upper_arm_id] = m1
-model.body.mass[forearm_id] = m2
+# 前腕
+forearm_body_id = model.body('right_elbow_link').id
+model.body_mass[forearm_body_id] = m2
+model.body_inertia[forearm_body_id] = [I2, I2, I2]
+model.body_ipos[forearm_body_id] = [0, 0, -lg2]  # 重心位置を設定
 
-# 慣性モーメントの上書き
+# 手先の情報を取得
+site_id = model.site('hand_tip').id
+body_id = model.site_bodyid[site_id]
 
+# 手先位置の取得
+hand_tip_position = data.site_xpos[site_id]
+
+# 手先速度の取得
+v_body = data.cvel[body_id][:3] # 手モデル中心の線速度
+omega_body = data.cvel[body_id][3:] # 手モデル中心の角速度
+r = hand_tip_position - data.xpos[body_id] # 手先位置 - ボディ中心位置
+hand_tip_velosity = v_body + np.cross(omega_body, r)
+
+# 初期姿勢の設定（例: 肩と肘の角度を設定）
+initial_pose = {
+    "right_shoulder_pitch_joint": 0.0,  # 初期角度 (度)
+    "right_shoulder_roll_joint": 0.0,
+    "right_shoulder_yaw_joint": 0.0,
+    "right_elbow_joint": -90.0,
+}
+
+initial_velocities = {
+    "right_shoulder_pitch_joint": 0.0,  # 初期角速度 (rad/s)
+    "right_shoulder_roll_joint": 0.0,
+    "right_shoulder_yaw_joint": 0.0,
+    "right_elbow_joint": 0.0,
+}
 
 # シミュレーション設定
-num_episodes = 5000
-max_steps_per_episode = 2000
-dt = model.opt.timestep  # MuJoCoのタイムステップ
+num_episodes = 20000
+max_steps_per_episode = 5000
+dt = model.opt.timestep  # MuJoCoのタイムステップ(dt = 0.001)
 
 # 保存ディレクトリ
 save_dir = "mujoco_results"
-os.makedirs(save_dir, exist_ok=True)
+info_dir = os.path.join(save_dir, "episode_info")  # 各エピソードの情報保存用
+qtable_dir = os.path.join(save_dir, "qtables")  # Qテーブル保存用
+reward_dir = os.path.join(save_dir, "reward_progress")  # 報酬遷移保存用
+
+# ディレクトリ作成
+os.makedirs(info_dir, exist_ok=True)
+os.makedirs(qtable_dir, exist_ok=True)
+os.makedirs(reward_dir, exist_ok=True)
+
+# 報酬遷移データの初期化
+reward_progress = []
 
 # Q学習のパラメータ
 alpha = 0.1
@@ -88,10 +128,10 @@ Q = np.zeros((num_q1_bins, num_q2_bins, num_q3_bins, num_q4_bins, num_q1_dot_bin
 
 # 各自由度のトルク範囲を定義（肩: 3自由度, 肘: 1自由度）
 torque_ranges = [
-    [-20.0, 0.0, 20.0],  # 肩ピッチのトルク範囲
-    [-15.0, 0.0, 15.0],  # 肩ロールのトルク範囲
-    [-10.0, 0.0, 10.0],  # 肩ヨーのトルク範囲
-    [-8.0, 0.0, 8.0],    # 肘ピッチのトルク範囲
+    [-30.0, 0.0, 30.0],  # 肩ピッチのトルク範囲
+    [-30.0, 0.0, 30.0],  # 肩ロールのトルク範囲
+    [-30.0, 0.0, 30.0],  # 肩ヨーのトルク範囲
+    [-20.0, 0.0, 20.0],    # 肘ピッチのトルク範囲
 ]
 
 # 全アクション（3*3*3*3=81通り）
@@ -124,36 +164,108 @@ def get_action(q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bi
 def get_torque(action_idx):
     return actions[action_idx]
 
-# 前腕リンク（手先が接続されているボディ）のID（mujoco内部での計算を出力するためにボディの情報を取得）
-forearm_id = model.body("right_elbow_link").id
-
 # 報酬（飛距離とする、手先速度v成分はmujoco側で計算、投射角は前方）
-def compute_reward(data, forearm_id, ):
-    # mujocoから手先速度を取得（vx,vy,vz）
-    v = data.xvelp[forearm_id] # [vx, vy, vz]
-    vx, vy, vz = v
+def compute_reward(data, site_id, cumulative_energy, g=9.81):
 
-    # 速度の合成（ノルムを計算）
-    v_syn = np.linalg.norm(v)
+    # 手先速度を取得（vx, vy, vz）
+    vx, vy, vz = hand_tip_velosity
 
-    # 投射角（vx, vy, vz成分を用いて示す）
+    # 速度成分の合成
+    v_syn = np.sqrt(vx**2 + vy**2 + vz**2)
     v_xy = np.sqrt(vx**2 + vy**2)
-    angle = np.degrees(np.arctan2(vz, v_xy))
 
-    # 飛距離の計算（0~90度のみ報酬ありで他の角度は叩きつけや後ろ投げのため報酬0、45度で報酬最大（1））
-    if 0 <= angle <= 90:
-        reward = (v**2 * np.sin(2 * angle)) / g
+    # 投射角計算
+    theta_v = np.arctan2(vz, v_xy)
+
+    # 手先の高さ（z座標）を取得
+    h_release = hand_tip_position[2]
+
+    # リリース高さの計算
+    h_shoulder = 0.818 * L
+    h = h_shoulder + h_release
+    
+    # 投射時間
+    t = (v_syn * np.sin(theta_v) + np.sqrt(v_syn**2 * (np.sin(theta_v))**2 + 2 * g * h)) / g
+
+    # 投射方向が-90~90度（右方向（前方向））のみで報酬を与える
+    if vx >= 0:
+        distance = v_syn * np.cos(theta_v) * t
     else:
-        reward = 0
+        distance = 0
 
-    reward = reward
-    reward -= 0.001 * cumulative_energy
+    # 報酬 = 飛距離 - 累積消費エネルギー
+    reward = distance - 0.01 * cumulative_energy
+
     return reward
 
+# シミュレーションループ
 def reset(data):
     mujoco.mj_resetData(model, data)
+
+    # 初期姿勢を設定
+    for joint_name, angle in initial_pose.items():
+        joint_id = model.joint(joint_name).qposadr  # qposのインデックス取得
+        data.qpos[joint_id] = np.radians(angle)  # 度からラジアンに変換して設定
+
+    # 初期角速度を設定
+    for joint_name, velocity in initial_velocities.items():
+        joint_id = model.joint(joint_name).dofadr  # qvelのインデックス取得
+        data.qvel[joint_id] = velocity  # そのまま設定
+
     return (data.qpos[0], data.qpos[1], data.qpos[2], data.qpos[3],
             data.qvel[0], data.qvel[1], data.qvel[2], data.qvel[3])
+
+# エネルギー計算関数
+def compute_energies(data, upper_arm_body_id, forearm_body_id, site_id, m1, m2, m_hand, g=9.81):
+    """
+    上腕、前腕、手先の運動エネルギーと位置エネルギーを計算
+    """
+    # 上腕リンクの速度
+    v_body_upper = data.cvel[upper_arm_body_id][:3]  # 上腕リンク中心の線速度
+    omega_body_upper = data.cvel[upper_arm_body_id][3:]  # 上腕リンクの角速度
+    v_upper_squared = np.sum(v_body_upper**2) # 上腕リンクの線速度の二乗
+    omega_upper_squared = np.sum(omega_body_upper**2) # 上腕リンクの角速度の二乗
+
+    # 上腕リンクの運動エネルギー
+    kinetic_energy_upper = 1 / 2 * m1 * v_upper_squared + 1 / 2 * I1 * omega_upper_squared
+
+    # 上腕の位置エネルギー (m * g * h)
+    h_upper = data.xpos[upper_arm_body_id][2]  # 上腕の高さ
+    potential_energy_upper = m1 * g * h_upper
+
+    # 前腕リンクの速度
+    v_body_forearm = data.cvel[forearm_body_id][:3]  # 上腕リンク中心の線速度
+    omega_body_forearm = data.cvel[forearm_body_id][3:]  # 上腕リンクの角速度
+    v_forearm_squared = np.sum(v_body_forearm**2) # 上腕リンクの線速度の二乗
+    omega_forearm_squared = np.sum(omega_body_forearm**2) # 上腕リンクの角速度の二乗
+
+    # 上腕リンクの運動エネルギー
+    kinetic_energy_forearm = 1 / 2 * m2 * v_forearm_squared + 1 / 2 * I2 * omega_forearm_squared
+
+    # 前腕リンクの位置エネルギー (m * g * h)
+    h_forearm = data.xpos[forearm_body_id][2]  # 前腕の高さ
+    potential_energy_forearm = m2 * g * h_forearm
+
+    # 手先の運動エネルギー (1/2 * m * v^2)
+    vx, vy, vz = hand_tip_velosity
+    v_hand_squared = vx**2 + vy**2 + vz**2
+    kinetic_energy_hand = 1 / 2 * m_hand * v_hand_squared
+
+    # 手先の位置エネルギー (m * g * h)
+    h_hand = data.site_xpos[site_id][2]  # 手先の高さ
+    potential_energy_hand = m_hand * g * h_hand
+
+    return (kinetic_energy_upper, potential_energy_upper,
+            kinetic_energy_forearm, potential_energy_forearm,
+            kinetic_energy_hand, potential_energy_hand)
+
+# 報酬の再計算
+def compute_reward_from_qtable(Q, state_bins, gamma):
+    """
+    学習終了時のQテーブルを用いて報酬を再計算
+    """
+    q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin = state_bins
+    return np.max(Q[q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin, :]) * gamma
 
 # メインループ
 for episode in range(num_episodes):
@@ -161,29 +273,131 @@ for episode in range(num_episodes):
     cumulative_energy = 0
     epsilon = 0.5 * (0.99 ** (episode + 1))
     max_reward = -float('inf')
+    release_step = -1
+    episode_data = []
+    episode_rewards = []
 
     for step in range(max_steps_per_episode):
         q1, q2, q3, q4, q1_dot, q2_dot, q3_dot, q4_dot = state
         q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin = digitize_state(q1, q2, q3, q4, q1_dot, q2_dot, q3_dot, q4_dot)
 
+        # アクションの選択と対応するトルクの適用
         action = get_action(q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin, epsilon)
         torque = get_torque(action)
         data.ctrl[:] = torque  # 各自由度にトルクを適用
 
-        mujoco.mj_step(model, data)  # MuJoCo内部で運動方程式を解く
+        # MuJoCo内部で運動方程式を解き、1ステップ実行
+        mujoco.mj_step(model, data) 
 
         # 状態更新
         next_state = (data.qpos[0], data.qpos[1], data.qpos[2], data.qpos[3],
                       data.qvel[0], data.qvel[1], data.qvel[2], data.qvel[3])
 
-        # 報酬計算
-        reward = compute_reward(next_state, cumulative_energy)
+        # 累積消費エネルギー (|トルク × 各リンクの角速度| × dt)
+        shoulder_p_energy_consumed = abs(data.ctrl[0] * data.qvel[0]) * dt
+        shoulder_r_energy_consumed = abs(data.ctrl[1] * data.qvel[1]) * dt
+        shoulder_y_energy_consumed = abs(data.ctrl[2] * data.qvel[2]) * dt
+        elbow_p_energy_consumed = abs(data.ctrl[3] * data.qvel[3]) * dt
+    
+        upper_arm_energy_consumed = shoulder_p_energy_consumed + shoulder_r_energy_consumed + shoulder_y_energy_consumed
+        forearm_energy_consumed = elbow_p_energy_consumed
+
+        cumulative_energy += upper_arm_energy_consumed + forearm_energy_consumed
+
+        # 手先位置、速度を取得
+        hand_tip_position = data.site_xpos[site_id]
+        v_body = data.cvel[body_id][:3] # 手モデル中心の線速度
+        omega_body = data.cvel[body_id][3:] # 手モデル中心の角速度
+        r = hand_tip_position - data.xpos[body_id] # 手先位置 - ボディ中心位置
+        hand_tip_velosity = v_body + np.cross(omega_body, r)
+        vx, vy, vz = hand_tip_velosity
+
+        # 投射角度
+        v_syn = np.sqrt(vx**2 + vy**2 + vx**2)
+        v_xy = np.sqrt(vx**2 + vy**2)
+        theta_v = np.degrees(np.arctan2(vz, v_xy))
+
+        # リリース高さ
+        h_release = hand_tip_position[2]
+        h_shoulder = 0.818 * L
+        h = h_shoulder + h_release
+
+        # 飛距離計算
+        if vx >= 0:  # 飛距離は正方向のみに計算
+            t_flight = (v_syn * np.sin(theta_v) + np.sqrt(v_syn**2 * (np.sin(theta_v))**2 + 2 * 9.81 * h)) / 9.81
+            distance = v_syn * np.cos(theta_v) * t_flight
+        else:
+            distance = 0
+
+        # エネルギー計算
+        # 各リンクのエネルギーを計算
+        (kinetic_energy_upper, potential_energy_upper,
+         kinetic_energy_forearm, potential_energy_forearm,
+         kinetic_energy_hand, potential_energy_hand) = compute_energies(
+            data, upper_arm_body_id, forearm_body_id, site_id, m1, m2, m_hand)
+
+
+        # 報酬の計算
+        reward = compute_reward(data, site_id, cumulative_energy)
+        # 報酬の記録
+        episode_rewards.append(reward)
+
+        # 最大報酬を記録
+        if reward > max_reward:
+            max_reward = reward
+            release_step = step
+
+        # Qテーブルの更新
         Q[q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin, action] += alpha * (
             reward + gamma * np.max(Q[q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin, :]) -
             Q[q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin, action]
         )
 
-        max_reward = max(max_reward, reward)
+        # データを収集
+        episode_data.append([
+            q1, q2, q3, q4,  # 各自由度の角度
+            q1_dot, q2_dot, q3_dot, q4_dot,  # 各自由度の角速度
+            theta_v,  # 投射角度
+            hand_tip_position[2],  # 手先のz座標（高さ）
+            vx, vy, vz,  # 各手先速度
+            v_syn,  # 手先合成速度
+            shoulder_p_energy_consumed, shoulder_r_energy_consumed, shoulder_y_energy_consumed, elbow_p_energy_consumed,  # 各自由度の消費エネルギー
+            cumulative_energy,  # 累積消費エネルギー
+            kinetic_energy_upper, potential_energy_upper,  # 上腕のエネルギー
+            kinetic_energy_forearm, potential_energy_forearm,  # 前腕のエネルギー
+            kinetic_energy_hand, potential_energy_hand,  # 手先のエネルギー
+            torque  # トルク
+        ])
+
+
+        # 状態の更新
         state = next_state
 
-    print(f"Episode {episode + 1}/{num_episodes}, Max Reward: {max_reward}")
+    # リリースステップまでの累積報酬和を計算
+    cumulative_reward_until_release = sum(episode_rewards[:release_step + 1]) if release_step != -1 else 0
+
+
+     # エピソードのログを出力
+    print(f"Episode {episode + 1}/{num_episodes}, Cumulative Reward Until Release: {cumulative_reward_until_release:.3f}, Max Reward: {max_reward:.3f} at Step: {release_step}")
+ 
+    # CSVにエピソードデータを保存
+    # episode_df = pd.DataFrame(episode_data, columns=[
+        # # 'q1', 'q2', 'q3', 'q4', 'q1_dot', 'q2_dot', 'q3_dot', 'q4_dot',
+        # 'theta_v', 'z_position', 'vx', 'vy', 'vz', 'v_syn',
+        # 'shoulder_pitch_energy', 'shoulder_roll_energy', 'shoulder_yaw_energy', 'elbow_pitch_energy',
+        # 'cumulative_energy',
+        # 'kinetic_energy_upper', 'potential_energy_upper',
+        # 'kinetic_energy_forearm', 'potential_energy_forearm',
+        # 'kinetic_energy_hand', 'potential_energy_hand',
+        # 'torque'
+    # ])
+    # episode_df.to_csv(f"{info_dir}/episode_{episode + 1}.csv", index=False)
+
+    # Qテーブルの保存
+    if (episode + 1) % 500 == 0:
+        np.save(f"{qtable_dir}/Q_episode_{episode + 1}.npy", Q)
+
+    # 報酬の遷移を保存
+    reward_progress.append([episode + 1, cumulative_reward_until_release, max_reward, release_step])
+    reward_df = pd.DataFrame(reward_progress, columns=['Episode', 'Cumulative Reward Until Release', 'Max Reward', 'Release Step'])
+    reward_df.to_csv(f"{reward_dir}/reward_progress.csv", index=False)
