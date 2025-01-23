@@ -90,7 +90,7 @@ initial_velocities = {
 }
 
 # シミュレーション設定
-num_episodes = 20000
+num_episodes = 50000
 max_steps_per_episode = 5000
 dt = model.opt.timestep  # MuJoCoのタイムステップ(dt = 0.001)
 
@@ -117,10 +117,10 @@ num_q1_bins = 5
 num_q2_bins = 5
 num_q3_bins = 5
 num_q4_bins = 5
-num_q1_dot_bins = 4
-num_q2_dot_bins = 4
-num_q3_dot_bins = 4
-num_q4_dot_bins = 4
+num_q1_dot_bins = 3
+num_q2_dot_bins = 3
+num_q3_dot_bins = 3
+num_q4_dot_bins = 3
 num_actions = 81
 
 # Qテーブル
