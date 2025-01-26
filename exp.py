@@ -79,7 +79,7 @@ initial_pose = {
     "right_shoulder_pitch_joint": 0.0,  # 初期角度 (度)
     "right_shoulder_roll_joint": 0.0,
     "right_shoulder_yaw_joint": 0.0,
-    "right_elbow_joint": -90.0,
+    "right_elbow_joint": 90.0,
 }
 
 initial_velocities = {
@@ -194,7 +194,7 @@ def compute_reward(data, site_id, cumulative_energy, g=9.81):
         distance = 0
 
     # 報酬 = 飛距離 - 累積消費エネルギー
-    reward = distance - 0.01 * cumulative_energy
+    reward = distance - 0.001 * cumulative_energy
 
     return reward
 
@@ -260,14 +260,18 @@ def compute_energies(data, upper_arm_body_id, forearm_body_id, site_id, m1, m2, 
             kinetic_energy_hand, potential_energy_hand)
 
 # 報酬の再計算
-def compute_reward_from_qtable(Q, state_bins, gamma):
+def compute_true_reward(Q, state_bins):
     """
     学習終了時のQテーブルを用いて報酬を再計算
     """
     q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin = state_bins
-    return np.max(Q[q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin, :]) * gamma
+    true_reward = np.max(Q[q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin, :]) 
+    return true_reward
 
 # メインループ
+max_true_reward = -float('inf')  # 1000エピソード内での最大のTrue Reward
+best_q_table = None  # 最大True Rewardに対応するQテーブル
+
 for episode in range(num_episodes):
     state = reset(data)
     cumulative_energy = 0
@@ -276,6 +280,7 @@ for episode in range(num_episodes):
     release_step = -1
     episode_data = []
     episode_rewards = []
+    max_q_table = None
 
     for step in range(max_steps_per_episode):
         q1, q2, q3, q4, q1_dot, q2_dot, q3_dot, q4_dot = state
@@ -346,6 +351,7 @@ for episode in range(num_episodes):
         if reward > max_reward:
             max_reward = reward
             release_step = step
+            max_q_table = Q.copy()
 
         # Qテーブルの更新
         Q[q1_bin, q2_bin, q3_bin, q4_bin, q1_dot_bin, q2_dot_bin, q3_dot_bin, q4_dot_bin, action] += alpha * (
@@ -373,12 +379,21 @@ for episode in range(num_episodes):
         # 状態の更新
         state = next_state
 
-    # リリースステップまでの累積報酬和を計算
-    cumulative_reward_until_release = sum(episode_rewards[:release_step + 1]) if release_step != -1 else 0
+    # # リリースステップまでの累積報酬和を計算
+    # cumulative_reward_until_release = sum(episode_rewards[:release_step + 1]) if release_step != -1 else 0
 
+    # 真の報酬を再計算
+    if max_q_table is not None:
+        true_reward = compute_true_reward(max_q_table, digitize_state(*state))
+        if true_reward > max_true_reward:
+            max_true_reward = true_reward
+            best_q_table = max_q_table.copy()
+    else:
+        true_reward = 0
 
-     # エピソードのログを出力
-    print(f"Episode {episode + 1}/{num_episodes}, Cumulative Reward Until Release: {cumulative_reward_until_release:.3f}, Max Reward: {max_reward:.3f} at Step: {release_step}")
+    # ターミナル出力
+    print(f"Episode {episode + 1}/{num_episodes}, Max Reward: {max_reward:.3f}, Max Step: {release_step}, True Reward: {true_reward:.3f}")
+
  
     # CSVにエピソードデータを保存
     # episode_df = pd.DataFrame(episode_data, columns=[
@@ -393,11 +408,21 @@ for episode in range(num_episodes):
     # ])
     # episode_df.to_csv(f"{info_dir}/episode_{episode + 1}.csv", index=False)
 
-    # Qテーブルの保存
-    if (episode + 1) % 500 == 0:
-        np.save(f"{qtable_dir}/Q_episode_{episode + 1}.npy", Q)
+    # 報酬履歴を記録
+    reward_progress.append([episode + 1, max_reward, release_step, true_reward])
 
-    # 報酬の遷移を保存
-    reward_progress.append([episode + 1, cumulative_reward_until_release, max_reward, release_step])
-    reward_df = pd.DataFrame(reward_progress, columns=['Episode', 'Cumulative Reward Until Release', 'Max Reward', 'Release Step'])
+    # 1000エピソードごとに最大True RewardのQテーブルを保存
+    if (episode + 1) % 1000 == 0:
+        if release_step != -1:
+            np.save(f"{qtable_dir}/Q_max_true_reward_episode_{episode + 1}_step_{release_step}.npy", best_q_table)
+            print(f"Saved Q table for episodes 1-{episode + 1}, Release Step: {release_step}, with Max True Reward: {max_true_reward:.3f}")
+        else:
+            np.save(f"{qtable_dir}/Q_max_true_reward_episode_{episode + 1}_no_release.npy", best_q_table)
+            print(f"Saved Q table for episodes 1-{episode + 1}, No Release Step, with Max True Reward: {max_true_reward:.3f}")
+        max_true_reward = -float('inf')  # 次の1000エピソード用にリセット
+        best_q_table = None  # リセット
+
+
+    # 結果をCSV保存
+    reward_df = pd.DataFrame(reward_progress, columns=['Episode', 'Max Reward', 'Max Step', 'True Reward'])
     reward_df.to_csv(f"{reward_dir}/reward_progress.csv", index=False)
