@@ -7,7 +7,7 @@ import pandas as pd
 from scipy.interpolate import RectBivariateSpline
 
 # MuJoCoモデルのロード
-model_path = '1.72_0.14.xml'  # あなたのMuJoCo XMLファイルパス
+model_path = 'g1.xml'  # あなたのMuJoCo XMLファイルパス
 model = MjModel.from_xml_path(model_path)
 data = MjData(model)
 
