@@ -32,11 +32,11 @@ m_hand = 0.006 * ma
 
 # 質点の質量（最後の+は投擲物の重さ）
 m1 = 0.028 * ma
-m2 = m_forearm + m_hand + 7.24
+m2 = m_forearm + m_hand + 0.14
 
 # 重心までの長さ（m_hand + 投擲物）
 lg1 = l1 / 2
-lg2 = (m_forearm * (l_forearm / 2) + m_hand * (l_forearm + l_hand / 2) + 7.24 * l2) / (m_forearm + m_hand + 7.24)
+lg2 = (m_forearm * (l_forearm / 2) + m_hand * (l_forearm + l_hand / 2) + 0.14 * l2) / (m_forearm + m_hand + 0.14)
 
 # 上腕の慣性モーメント
 I1 = m1 * l1**2 / 12
@@ -45,12 +45,12 @@ I2_forearm = m_forearm * l_forearm**2 / 12 + m_forearm * lg1**2
 # 手の慣性モーメント（平行軸の定理）
 I2_hand = m_hand * l_hand**2 / 12 + m_hand * (l_forearm + lg2)**2
 # 投擲物の慣性モーメント
-I2_ball = 7.24 * l2**2
+I2_ball = 0.14 * l2**2
 # 前腕リンク全体の慣性モーメント
 I2 = I2_forearm + I2_hand + I2_ball
 
 # 保存ディレクトリ
-save_dir = "hougan5"
+save_dir = "1.72_7.24"
 # info_dir = os.path.join(save_dir, "episode_info")  # 各エピソードの情報保存用
 qtable_dir = os.path.join(save_dir, "qtables")  # Qテーブル保存用
 reward_dir = os.path.join(save_dir, "reward_progress")  # 報酬遷移保存用
@@ -177,7 +177,7 @@ max_steps_per_episode = 3000
 dt = model.opt.timestep  # MuJoCoのタイムステップ(dt = 0.001)
 
 # # 保存ディレクトリ
-# save_dir = "0129_7.24c"
+# save_dir = "0129_0.14c"
 # # info_dir = os.path.join(save_dir, "episode_info")  # 各エピソードの情報保存用
 # qtable_dir = os.path.join(save_dir, "qtables")  # Qテーブル保存用
 # reward_dir = os.path.join(save_dir, "reward_progress")  # 報酬遷移保存用
@@ -339,66 +339,6 @@ def reset(data):
             data.qpos[0], data.qpos[1], data.qpos[2], data.qpos[3],
             data.qvel[0], data.qvel[1], data.qvel[2], data.qvel[3])
 
-
-#     mujoco.mj_resetData(model, data)
-
-#     # 初期姿勢を設定
-#     for joint_name, angle in initial_pose.items():
-#         joint_id = model.joint(joint_name).qposadr  # qposのインデックス取得
-#         data.qpos[joint_id] = np.radians(angle)  # 度からラジアンに変換して設定
-
-#     # 初期角速度を設定
-#     for joint_name, velocity in initial_velocities.items():
-#         joint_id = model.joint(joint_name).dofadr  # qvelのインデックス取得
-#         data.qvel[joint_id] = velocity  # そのまま設定
-
-#     return (data.qpos[0], data.qpos[1], data.qpos[2], data.qpos[3],
-#             data.qvel[0], data.qvel[1], data.qvel[2], data.qvel[3])
-
-# # エネルギー計算関数
-# def compute_energies(data, upper_arm_body_id, forearm_body_id, site_id, m1, m2, m_hand, g=9.81):
-#     """
-#     上腕、前腕、手先の運動エネルギーと位置エネルギーを計算
-#     """
-#     # 上腕リンクの速度
-#     v_body_upper = data.cvel[upper_arm_body_id][:3]  # 上腕リンク中心の線速度
-#     omega_body_upper = data.cvel[upper_arm_body_id][3:]  # 上腕リンクの角速度
-#     v_upper_squared = np.sum(v_body_upper**2) # 上腕リンクの線速度の二乗
-#     omega_upper_squared = np.sum(omega_body_upper**2) # 上腕リンクの角速度の二乗
-
-#     # 上腕リンクの運動エネルギー
-#     kinetic_energy_upper = 1 / 2 * m1 * v_upper_squared + 1 / 2 * I1 * omega_upper_squared
-
-#     # 上腕の位置エネルギー (m * g * h)
-#     h_upper = data.xpos[upper_arm_body_id][2]  # 上腕の高さ
-#     potential_energy_upper = m1 * g * h_upper
-
-#     # 前腕リンクの速度
-#     v_body_forearm = data.cvel[forearm_body_id][:3]  # 上腕リンク中心の線速度
-#     omega_body_forearm = data.cvel[forearm_body_id][3:]  # 上腕リンクの角速度
-#     v_forearm_squared = np.sum(v_body_forearm**2) # 上腕リンクの線速度の二乗
-#     omega_forearm_squared = np.sum(omega_body_forearm**2) # 上腕リンクの角速度の二乗
-
-#     # 上腕リンクの運動エネルギー
-#     kinetic_energy_forearm = 1 / 2 * m2 * v_forearm_squared + 1 / 2 * I2 * omega_forearm_squared
-
-#     # 前腕リンクの位置エネルギー (m * g * h)
-#     h_forearm = data.xpos[forearm_body_id][2]  # 前腕の高さ
-#     potential_energy_forearm = m2 * g * h_forearm
-
-#     # 手先の運動エネルギー (1/2 * m * v^2)
-#     vx, vy, vz = hand_tip_velosity
-#     v_hand_squared = vx**2 + vy**2 + vz**2
-#     kinetic_energy_hand = 1 / 2 * m_hand * v_hand_squared
-
-#     # 手先の位置エネルギー (m * g * h)
-#     h_hand = data.site_xpos[site_id][2]  # 手先の高さ
-#     potential_energy_hand = m_hand * g * h_hand
-
-#     return (kinetic_energy_upper, potential_energy_upper,
-#             kinetic_energy_forearm, potential_energy_forearm,
-#             kinetic_energy_hand, potential_energy_hand)
-
 # 報酬の再計算
 def compute_true_reward(Q, state_bins):
     """
@@ -420,6 +360,12 @@ for episode in range(num_episodes):
 
     # 初期姿勢を記録
     episode_initial_poses.append([episode + 1, q1_init, q2_init, q3_init, q4_init])
+    
+    # 各エピソードごとに初期姿勢を ini_pos フォルダに保存
+    pose_df = pd.DataFrame([[episode + 1, q1_init, q2_init, q3_init, q4_init]],
+                           columns=['Episode', 'q1_init', 'q2_init', 'q3_init', 'q4_init'])
+    pose_df.to_csv(os.path.join(pos_dir, f"episode_init_pose_{episode + 1}.csv"), index=False)
+
     cumulative_energy = 0
     epsilon = 0.5 * (0.99 ** (episode + 1))
     max_reward = -float('inf')
@@ -561,24 +507,18 @@ for episode in range(num_episodes):
     # 報酬履歴を記録
     reward_progress.append([episode + 1, max_reward, release_step, true_reward])
 
-    # 1000エピソードごとに最大True RewardのQテーブルを保存
-    if (episode + 1) % 100 == 0:
+    # 1エピソードごとに最大True RewardのQテーブルを保存
+    if (episode + 1) % 1 == 0:
         if release_step != -1:
-            np.save(f"{qtable_dir}/Q_max_true_reward_episode_{episode + 1}_step_{release_step}.npy", best_q_table)
-            print(f"Saved Q table for episodes 1-{episode + 1}, Release Step: {release_step}, with Max True Reward: {max_true_reward:.3f}")
+            np.save(f"{qtable_dir}/Q_max_reward_episode_{episode + 1}.npy", best_q_table)
+            print(f"Saved Q table for episodes_{episode + 1}, with Max True Reward: {max_true_reward:.3f}")
         else:
             np.save(f"{qtable_dir}/Q_max_true_reward_episode_{episode + 1}_no_release.npy", best_q_table)
-            print(f"Saved Q table for episodes 1-{episode + 1}, No Release Step, with Max True Reward: {max_true_reward:.3f}")
+            print(f"Saved Q table for episodes_{episode + 1}, No Release Step, with Max True Reward: {max_true_reward:.3f}")
         max_true_reward = -float('inf')  # 次の1000エピソード用にリセット
         best_q_table = None  # リセット
 
 
     # 結果をCSV保存
     reward_df = pd.DataFrame(reward_progress, columns=['Episode', 'Max Reward', 'Max Step', 'True Reward'])
-    reward_df.to_csv(f"{reward_dir}/reward_progress_hougan.csv", index=False)
-
-# 全エピソード終了後に初期姿勢データをCSVに保存
-pose_df = pd.DataFrame(episode_initial_poses, columns=['Episode', 'q1_init', 'q2_init', 'q3_init', 'q4_init'])
-pose_csv_path = os.path.join(save_dir, "episode_init_pose.csv")
-pose_df.to_csv(pose_csv_path, index=False)
-print(f"Initial poses saved to {pose_csv_path}")
+    reward_df.to_csv(f"{reward_dir}/reward_progress_1.72_7.24.csv", index=False)
