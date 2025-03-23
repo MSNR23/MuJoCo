@@ -4,9 +4,9 @@ import pandas as pd
 import cv2
 
 # モデルとデータの読み込み
-model_path = "hougan.xml"
-csv_path = "7.24_1.72_9140_data.csv"
-output_video = "7.24_1.72.mp4"
+model_path = "g1.xml"
+csv_path = "1.72_0.14.csv"
+output_video = "1.72_0.14.mp4"
 
 # MuJoCo モデルを読み込み
 model = mujoco.MjModel.from_xml_path(model_path)
